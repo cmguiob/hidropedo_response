@@ -18,8 +18,10 @@ Este estudio tiene como objetivo identificar patrones espacio- temporales de la 
 
 * Los datos de suelos se usan como variables explicativas de la respuesta hidrológica de humedad del suelo. Estos se extrajeron de *SoilGrids v.2*, una base global derivada mediante machine-learning que predice 12 propiedades físico-químicas a seis profundidades hasta 200 cm (Hengl et al., 2017, Poggio et al. 2021). En este trabajo se re-muestraron dichos datos a 1 km para mantener coherencia espacial con SMAP-DisPATCh. Se seleccionaron propiedades morfológicas (antiguas) y químicas (recientes) cuya variación vertical ha sido usada en estudios in-situ para develar la respuesta hidrológica del suelo (Bower et al. 2014): arcilla, limo, arena, densidad, pH y contenido de carbono orgánico, a 5 rangos de profundidades, hasta los 100 cm.
 
-
-
+**Repositorio**
+* *Scripts:* Este repositorio contiene los códigos -desarrollados en R- para carga masiva, pre-procesamiento y análisis de patrones espacio-temporales.
+* *Datos:* Los datos fuente se procesaron para optimizar el análisis. Se encuentran solo los datos intermedios que sirven como insumo para los análisis.
+* *Figuras:* Se almacenan acá las gráficas producto del procesamiento y análisis de datos espaciales.
 
 
 
