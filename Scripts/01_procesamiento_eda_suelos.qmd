@@ -1,0 +1,89 @@
+---
+title: "Procesamiento y análisis exploratorio de datos de suelos"
+author: Carlos Guío
+format: html
+---
+
+Este cuaderno utiliza un script externo para llamar los datos de SoilGrids a resolución de 1 x 1 km, y los exporta a formato .tif para luego analizarlos, de forma exploratoria, permitiendo la visualización de perfiles promedio por tipo de propiedad, así como la identificación de dominios espaciales. El análisis se realiza para todo Colombia.
+
+
+```{r setup}
+
+# Para cargar librerias se verifica pacman
+if ("pacman" %in% installed.packages() == FALSE) install.packages("pacman")
+
+# Se cargan las librerias
+pacman::p_load(char = c(
+  "here", #manejo de rutas
+  "sf", #manipulación de dats espaciales
+  "dplyr", #procesamiento de data frames
+  "ggplot2",  #graficación
+  "patchwork", #mosaicos gráficos
+  "wesanderson", #paleta de colores
+  "qs" #escribir y leer rápidamente objetos R
+  )
+)
+
+#Paleta de colores
+pal <- wes_palette("Zissou1", 100, type = "continuous")
+
+# Ajusta tamaño de letra para las gráficas que genere el script
+theme(base_size = 14)
+
+```
+
+### 1. Carga de datos
+
+```{r carga}
+
+# Source the function
+source("00_funcion_carga_soilgrids.R")
+
+# Call the function with custom arguments
+stack_suelo_medias <- descargar_soilgrids_stack(
+  vars = c("cfvo", "sand", "silt", "clay", "bdod", "soc"),
+  depths = c("0-5cm", "5-15cm", "15-30cm", "60-100cm"),
+  stats = c("mean"),
+  resolucion = c(1000, 1000)
+)
+
+
+```
+
+Se valida que los archivos se cargaron correctamente. Para esto, se calculan 
+
+```{r}
+
+#Validación
+names(stack_suelo_medias) #nombres de capas
+# Medias por capa
+global(stack_suelo_medias, fun = "mean", na.rm = TRUE)
+# NAs por capa
+na_counts <- global(stack_suelo_medias, fun = function(x) sum(is.na(x)))
+
+```
+
+
+## 3. Pre-procesamiento
+
+Se normalizan las escalas de las propiedades para poder usarlas posteriormente en modelos
+
+```{r}
+
+normaliza_var <- function(x) (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
+stack_suelo_z <- app(stack_suelo_medias, normaliza_var)
+
+```
+
+
+Se convierten los archivos .vrt en .tif para facilitar graficación y análisis.
+
+```{r}
+
+terra::writeRaster(stack_suelo_z, here::here("Data","soilgrids_stack.tif"), overwrite = TRUE)
+
+stack_suelo_z_tif <- terra::rast(here::here("Data","soilgrids_stack.tif"))
+
+plot(stack_suelo_z_tif)
+```
+
