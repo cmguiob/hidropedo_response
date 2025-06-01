@@ -1,0 +1,5 @@
+# Ignore TIFF files
+*.tif
+
+# Ignore a specific file
+Data/soilgrids_stack.tifData/soilgrids_stack.tif

@@ -5,6 +5,7 @@
 # El ISRIC pone SoilGrids disponible de forma gratuita, info en los enlaces:
 # https://www.isric.org/explore/soilgrids
 # https://www.isric.org/explore/soilgrids/soilgrids-access
+# https://www.isric.org/explore/soilgrids/faq-soilgrids
 # Descripción:
 # Este script contiene una función para descargar de forma masiva varias 
 # capas de SoilGrids, correspondientes a distintas variables, profundidades y
