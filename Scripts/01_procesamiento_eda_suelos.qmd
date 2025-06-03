@@ -37,7 +37,7 @@ theme(base_size = 14)
 ```{r carga}
 
 # Crea un objeto tipo función al ejecutar un  script externo
-source("00_funcion_carga_soilgrids.R")
+source("00_funcion_descarga_soilgrids.R")
 
 # Se llama la función con los argumentos adaptados al proyecto
 stack_suelo_medias <- descargar_soilgrids_stack(

@@ -1,0 +1,102 @@
+---
+title: "Procesamiento y análisis exploratorio de datos de humedad del suelo - SMAP"
+author: Carlos Guío
+format: html
+---
+
+Este cuaderno utiliza un script externo para llamar los datos de ...
+
+
+```{r setup}
+
+# Para cargar librerias se verifica pacman
+if ("pacman" %in% installed.packages() == FALSE) install.packages("pacman")
+
+# Se cargan las librerias
+pacman::p_load(char = c(
+  "here", #manejo de rutas
+  "googledrive", #manejo de archivos en Google Drive
+  "sf", #manipulación de dats espaciales
+  "terra", #rasters
+  "dplyr", #procesamiento de data frames
+  "ggplot2",  #graficación
+  "patchwork", #mosaicos gráficos
+  "wesanderson", #paleta de colores
+  "qs" #escribir y leer rápidamente objetos R
+  )
+)
+
+#Paleta de colores
+pal <- wes_palette("Zissou1", 100, type = "continuous")
+
+# Ajusta tamaño de letra para las gráficas que genere el script
+theme(base_size = 14)
+
+```
+
+### 1. Carga de datos
+
+Se llama la función para descarga de datos. Esta se 
+
+```{r carga}
+
+
+source("00_funcion_descarga_smap_dispatch.R")   # carga función
+
+# 1. Credenciales Earthdata
+Sys.setenv(EARTHDATA_USER = "cmguiob@unal.edu.co", EARTHDATA_PASS = "Emacacus56900!")
+
+# 2. Bounding box Colombia (lat/long WGS-84)
+bbox_col <- c(-79.11, -4.49, -65.65, 12.58)
+
+# 4. Ejecuta la función para 2022-2023
+download_smap_dispatch(
+  start_date      = "2022-01-01",
+  end_date        = "2023-12-31",
+  bbox            = bbox_col,
+  drive_folder_id = "1MO7foHhqvcI6zRI2EFJ2ic_KvVdlWQXM", #acá se guardan los .tif
+  earthdata_user  = Sys.getenv("EARTHDATA_USER"),
+  earthdata_pass  = Sys.getenv("EARTHDATA_PASS")
+)
+
+```
+
+Verificación
+
+```{r}
+
+dir_smap <- "C:/Users/cguio/Documents"
+files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}\\.tif$", full.names = TRUE)
+stopifnot(length(files) > 0)
+
+sm_stack <- rast(files)
+
+# 1. Calculo de raster promedio mensual
+mean_r <- mean(sm_stack, na.rm = TRUE)
+
+# 2. Guarda como PNG
+out_plot <- file.path(dir_smap, "SMAP_1km_SM_DS_mean_plot.png")
+png(out_plot, width = 1500, height = 1100, res = 150)
+plot(mean_r, main = "Mean Soil Moisture (SM_DS, all dates)", col = terrain.colors(20))
+dev.off()
+cat("Plot saved to:", out_plot, "\n")
+
+
+```
+
+```{r}
+
+# 1. List all descending-orbit rasters
+dir_smap <- "C:/Users/cguio/Documents"
+files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}\\.tif$", full.names = TRUE)
+stopifnot(length(files) > 0)
+
+# 2. Read as SpatRaster stack (terra auto-aligns to intersection)
+sm_stack <- rast(files)
+
+# 3. Quick plot: mean mosaic (across all dates)
+plot(mean(sm_stack, na.rm = TRUE), main = "SM DS (220701 - 220708)")
+
+
+```
+
