@@ -54,12 +54,15 @@ Se valida que los archivos se cargaron correctamente. Para esto, se calculan
 
 ```{r}
 
-#Validación
-names(stack_suelo_medias) #nombres de capas
-# Medias por capa
-global(stack_suelo_medias, fun = "mean", na.rm = TRUE)
-# NAs por capa
+# 1. Validación
+names(stack_suelo_medias)  # Nombres de las capas
+
+# 2. Medias por capa
+print(global(stack_suelo_medias, fun = "mean", na.rm = TRUE))
+
+# 3. NAs por capa
 na_counts <- global(stack_suelo_medias, fun = function(x) sum(is.na(x)))
+print(na_counts)
 
 ```
 
@@ -70,8 +73,17 @@ Se normalizan las escalas de las propiedades para poder usarlas posteriormente e
 
 ```{r}
 
-normaliza_var <- function(x) (x - mean(x, na.rm=TRUE)) / sd(x, na.rm=TRUE)
-stack_suelo_z <- app(stack_suelo_medias, normaliza_var)
+# 4. Normalización Z por capa
+normaliza_var <- function(x) (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+stack_suelo_z <- app(stack_suelo_medias, fun = normaliza_var)
+
+# 5. Guardar el stack como .tif
+out_raster <- here("Data", "soilgrids_stack.tif")
+writeRaster(stack_suelo_z, filename = out_raster, overwrite = TRUE)
+
+# 6. Volver a cargar desde archivo (opcional)
+stack_suelo_z_tif <- rast(out_raster)
+
 
 ```
 
@@ -80,10 +92,23 @@ Se convierten los archivos .vrt en .tif para facilitar graficación y análisis.
 
 ```{r}
 
-terra::writeRaster(stack_suelo_z, here::here("Data","soilgrids_stack.tif"), overwrite = TRUE)
 
-stack_suelo_z_tif <- terra::rast(here::here("Data","soilgrids_stack.tif"))
+# 7. Graficar mosaico PNG
+out_dir  <- here("Figures")
+out_plot <- file.path(out_dir, "soilgrids.png")
 
-plot(stack_suelo_z_tif)
+# Dimensiones del PNG (ajustables)
+n_layers <- nlyr(stack_suelo_z_tif)
+png(out_plot, width = 3000, height = 3000, res = 300)
+
+plot(
+  stack_suelo_z_tif,
+  main = names(stack_suelo_z_tif),  # Títulos por capa
+  col = terrain.colors(20),
+  mar = c(2, 2, 4, 6)
+)
+
+dev.off()
+cat("Mosaico PNG guardado en:", out_plot, "\n")
 ```
 

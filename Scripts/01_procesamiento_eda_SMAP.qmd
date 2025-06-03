@@ -19,6 +19,7 @@ pacman::p_load(char = c(
   "sf", #manipulación de dats espaciales
   "terra", #rasters
   "dplyr", #procesamiento de data frames
+  "lubridate", #manejo de fechas
   "ggplot2",  #graficación
   "patchwork", #mosaicos gráficos
   "wesanderson", #paleta de colores
@@ -65,7 +66,7 @@ Verificación
 
 ```{r}
 
-dir_smap <- "C:/Users/cguio/Documents"
+dir_smap <- here::here("Data")
 files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}\\.tif$", full.names = TRUE)
 stopifnot(length(files) > 0)
 
@@ -73,30 +74,211 @@ sm_stack <- rast(files)
 
 # 1. Calculo de raster promedio mensual
 mean_r <- mean(sm_stack, na.rm = TRUE)
+#plot(mean_r)
 
 # 2. Guarda como PNG
-out_plot <- file.path(dir_smap, "SMAP_1km_SM_DS_mean_plot.png")
+out_plot <- file.path(here::here("Figures"), "SMAP_1km_SM_DS_202207_media_plot.png")
 png(out_plot, width = 1500, height = 1100, res = 150)
-plot(mean_r, main = "Mean Soil Moisture (SM_DS, all dates)", col = terrain.colors(20))
+plot(mean_r, main = "Media Humedad del Suelo (SM_DS, 202207)", col = terrain.colors(20))
 dev.off()
 cat("Plot saved to:", out_plot, "\n")
 
 
 ```
 
+Verificación de promedios semanales
+
 ```{r}
 
-# 1. List all descending-orbit rasters
-dir_smap <- "C:/Users/cguio/Documents"
+
+dir_smap <- here::here("Data")
+out_dir  <- here::here("Figures")
+
 files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}\\.tif$", full.names = TRUE)
 stopifnot(length(files) > 0)
 
-# 2. Read as SpatRaster stack (terra auto-aligns to intersection)
-sm_stack <- rast(files)
+# Extrae fecha y semana ISO de cada archivo
+dates <- as.Date(sub(".*SM_DS_([0-9]{8})\\.tif$", "\\1", files), "%Y%m%d")
+weeks <- isoweek(dates)
+years <- isoyear(dates)  # semanas pueden cruzar años
 
-# 3. Quick plot: mean mosaic (across all dates)
-plot(mean(sm_stack, na.rm = TRUE), main = "SM DS (220701 - 220708)")
+# Dataframe para agrupar por semana/año
+df <- data.frame(file = files, week = weeks, year = years, date = dates)
+
+# Agrupa por año y semana ISO
+week_keys <- df %>%
+  group_by(year, week) %>%
+  summarise(files = list(file),
+            start_date = min(date),
+            end_date   = max(date),
+            .groups = "drop") %>%
+  arrange(year, week)
+
+# Calcula el raster promedio por semana y guarda los títulos
+weekly_means <- list()
+titles <- character()
+for (i in seq_len(nrow(week_keys))) {
+  wk_files <- week_keys$files[[i]]
+  if (length(wk_files) == 0) next
+  r <- rast(wk_files)
+  mean_r <- mean(r, na.rm = TRUE)
+  weekly_means[[i]] <- mean_r
+  titles[i] <- sprintf("Humedad del Suelo Promedio semana %s a %s",
+                       format(week_keys$start_date[i]), format(week_keys$end_date[i]))
+}
+
+# Remueve NULLs por si faltó alguna semana
+weekly_means <- Filter(Negate(is.null), weekly_means)
+titles <- titles[seq_along(weekly_means)]
+
+# Apila todos los promedios semanales
+stack_weeks <- rast(weekly_means)
+names(stack_weeks) <- titles
+
+# Plotea el mosaico con títulos personalizados
+out_plot <- file.path(out_dir, "SMAP_1km_SM_DS_weekly_mosaic_titled.png")
+png(out_plot, width = 2200, height = 1400, res = 120)
+plot(stack_weeks,
+     main = titles,
+     col = terrain.colors(20),
+     mar = c(2,2,4,6)) # espacio para títulos largos
+dev.off()
+cat("Mosaico PNG guardado en:", out_plot, "\n")
 
 
 ```
+
+Verificación de promedios cada 4 días
+
+
+```{r}
+
+
+dir_smap <- here::here("Data")
+out_dir  <- here::here("Figures")
+
+files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}\\.tif$", full.names = TRUE)
+stopifnot(length(files) > 0)
+
+# Extrae fechas
+dates <- as.Date(sub(".*SM_DS_([0-9]{8})\\.tif$", "\\1", files), "%Y%m%d")
+df <- data.frame(file = files, date = dates)
+df <- arrange(df, date)
+
+# Define ventanas de 4 días no solapados
+n <- 4
+n_blocks <- ceiling(nrow(df)/n)
+block_ids <- rep(seq_len(n_blocks), each = n)[seq_len(nrow(df))]
+df$block <- block_ids
+
+# Calcula raster promedio por bloque de 4 días y guarda los títulos
+block_means <- list()
+titles <- character()
+for (i in unique(df$block)) {
+  blk_files <- df$file[df$block == i]
+  if (length(blk_files) == 0) next
+  r <- rast(blk_files)
+  mean_r <- mean(r, na.rm = TRUE)
+  block_means[[i]] <- mean_r
+  blk_dates <- df$date[df$block == i]
+  titles[i] <- sprintf("Humedad del Suelo Promedio\n%s a %s",
+                       format(min(blk_dates)), format(max(blk_dates)))
+}
+
+block_means <- Filter(Negate(is.null), block_means)
+titles <- titles[seq_along(block_means)]
+
+# Apila todos los promedios
+stack_blocks <- rast(block_means)
+names(stack_blocks) <- titles
+
+# Plotea mosaico con títulos por panel
+out_plot <- file.path(out_dir, "SMAP_1km_SM_DS_4day_mosaic.png")
+png(out_plot, width = 2200, height = 1400, res = 120)
+plot(stack_blocks,
+     main = titles,
+     col = terrain.colors(20),
+     mar = c(2,2,4,6))
+dev.off()
+cat("Mosaico PNG guardado en:", out_plot, "\n")
+
+```
+Verificación de serie de tiempo. Primero se seleccionan y verifican 4 puntos
+
+```{r}
+
+coords <- data.frame(
+  x = c(-70, -74.5, -74, -76.5),
+  y = c(4,    5,   10,   5.5)
+)
+point_names <- c("Amazonia", "Andina", "Caribe", "Pacífico")
+
+plot(sm_stack[[1]])
+points(coords$x, coords$y, pch=19, col=2:5, cex=2)
+```
+
+
+```{r}
+
+library(terra)
+library(ggplot2)
+library(tidyr)
+
+dir_smap <- here::here("Data")
+files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}", full.names = TRUE)
+stopifnot(length(files) > 0)
+
+dates <- as.Date(sub(".*SM_DS_([0-9]{8}).*", "\\1", files), "%Y%m%d")
+ord <- order(dates)
+files <- files[ord]
+dates <- dates[ord]
+sm_stack <- rast(files)
+
+# Verifica que los puntos están dentro del extent
+ext_r <- ext(sm_stack)
+for(i in 1:nrow(coords)) {
+  if(!(coords$x[i] >= ext_r[1] && coords$x[i] <= ext_r[2] && coords$y[i] >= ext_r[3] && coords$y[i] <= ext_r[4])) {
+    warning(sprintf("El punto %s (%.2f, %.2f) está fuera del extent del raster.", point_names[i], coords$x[i], coords$y[i]))
+  }
+}
+
+# Extrae valores (usa method="simple" y desactiva ID)
+valores <- terra::extract(sm_stack, coords, method = "simple", ID = FALSE)
+
+if (all(is.na(valores))) {
+  stop("Ningún punto coincide con píxeles válidos. Prueba con coordenadas ligeramente distintas o revisa el extent del raster.")
+}
+
+# Si algún punto quedó vacío, adviértelo:
+for(i in 1:nrow(coords)) {
+  if(all(is.na(valores[i, ]))) warning(sprintf("El punto %s quedó vacío (NAs)", point_names[i]))
+}
+
+# Dataframe largo
+df_long <- as.data.frame(t(valores))
+colnames(df_long) <- point_names
+df_long$fecha <- dates
+
+df_long <- pivot_longer(df_long, -fecha, names_to = "Zona", values_to = "SM")
+
+# Grafica sólo si hay datos
+if(any(!is.na(df_long$SM))) {
+  ggplot(df_long, aes(x = fecha, y = SM, color = Zona)) +
+    geom_point(size = 1.2) +
+    labs(title = "Serie diaria de humedad del suelo",
+         x = "Fecha", y = "Humedad del suelo (m³/m³)", color = "Zona") +
+    theme_minimal(base_size = 14)
+} else {
+  cat("No hay datos válidos para graficar en los puntos seleccionados.\n")
+}
+
+# Imprime coordenadas y revisa
+coords$Zona <- point_names
+print(coords)
+
+
+
+
+```
+
 
