@@ -1,16 +1,7 @@
----
-title: "Procesamiento y análisis exploratorio de series de tiempo de precipitación y humedad del suelo"
-author: Carlos Guío
-format: html
----
-
-Este cuaderno utiliza scripts externo para descargar los datos de humedad de suelo de SMAP y de precipitación de CHIRPS y armonizarlos espacial y temporalmente para poder calcular métricas de respuesta hidrológica del suelo.
-
-
-```{r configuracion}
+## ----configuracion------------------------------------------------------------------------------------------
 
 #Para exportar como .R plano
-# knitr::purl('01_procesamiento_eda_SMAP.qmd')
+# knitr::purl('03_analisis_eda_rao_colombia.Rmd')
 
 # Para cargar librerias se verifica pacman
 if ("pacman" %in% installed.packages() == FALSE) install.packages("pacman")
@@ -19,7 +10,6 @@ if ("pacman" %in% installed.packages() == FALSE) install.packages("pacman")
 pacman::p_load(char = c(
   "here",                   # manejo de rutas
   "googledrive",            # manejo de archivos en Google Drive
-  "rsoi",                   # serie de tiempo ONI
   "sf",                     # manipulación de dats espaciales
   "terra",                  # rasters
   "dplyr",                  # procesamiento de data frames
@@ -55,191 +45,38 @@ reticulate::py_run_string("import ee; ee.Initialize(project='even-electron-46171
 
 # === Autenticación Google Drive ===
 googledrive::drive_auth()
-```
-
-## 1. Carga de datos 
-
-### 1.1 Carga ONI
-
-El Oceanic Niño Index (ONI) es la medida oficial del fenómeno ENSO, basada en la anomalía de temperatura superficial del mar en la región Niño 3.4 del Pacífico ecuatorial. Según NOAA, se considera un evento:
-
-El Niño si ONI ≥ +0.5 °C durante al menos 5 meses consecutivos.
-
-La Niña si ONI ≤ –0.5 °C durante al menos 5 meses consecutivos.
-
-En este bloque descargamos la serie ONI, identificamos periodos Niño y Niña siguiendo ese criterio, y los visualizamos. Estos eventos guiarán la selección del periodo de análisis hidrológico del proyecto.
 
 
-```{r tabla_oni}
+## -----------------------------------------------------------------------------------------------------------
 
-# 1. Descargar serie ENSO
-enso_raw <- rsoi::download_enso()
+#Falta código
 
-# 2. Preparar datos
-enso_df <- enso_raw |>
-  mutate(
-    Date = as.Date(Date),
-    year = year(Date),
-    month = month(Date),
-    oni_cat = case_when(
-      ONI >= 0.5 ~ "El Niño",
-      ONI <= -0.5 ~ "La Niña",
-      TRUE ~ "Neutral"
-    )
-  )
 
-# 3. Identificar bloques Niño/Niña de al menos 5 meses consecutivos
-get_events <- function(df, target_phase, min_length = 5) {
-  df <- df %>%
-    mutate(flag = oni_cat == target_phase,
-           grp = cumsum(c(0, diff(flag)) != 0 & flag)) %>%
-    group_by(grp) %>%
-    filter(flag) %>%
-    summarise(start = min(Date), end = max(Date), n_months = n()) %>%
-    filter(n_months >= min_length) %>%
-    mutate(phase = target_phase) %>%
-    select(phase, start, end, n_months)
-  return(df)
-}
 
-nino_events <- get_events(enso_df, "El Niño", 5)
-nina_events <- get_events(enso_df, "La Niña", 5)
+## ----carga--------------------------------------------------------------------------------------------------
 
-# 4. Mostrar periodos válidos
-events_tbl <- bind_rows(nino_events, nina_events) %>%
-  arrange(start)
 
-print(events_tbl)
-
-```
-
-Con base en el índice ONI y la definición oficial de NOAA, se identificaron múltiples eventos El Niño y La Niña desde 1950. Para este proyecto se seleccionaron dos eventos recientes y bien definidos: El Niño 2015–2016 y La Niña 2021–2022. Ambos presentan duración suficiente (≥9 meses), magnitud significativa y cobertura dentro del periodo de disponibilidad de datos satelitales SMAP y CHIRPS. Para capturar adecuadamente las condiciones previas y posteriores al forzamiento ENSO, se extendieron los rangos de análisis en dos meses antes -en lso casos posibles- y después del evento. Estos intervalos (abril 2015 a junio 2016 y julio 2021 a febrero 2023) serán utilizados para extraer y analizar series de precipitación y humedad del suelo a lo largo del país.
-
-Se presenta la selección visualmente
-
-```{r visualiza_oni}
-
-# Crear data frame con los periodos seleccionados
-selected_periods <- data.frame(
-  start = as.Date(c("2015-03-31", "2021-07-01")),
-  end   = as.Date(c("2016-06-01", "2023-02-01"))
-)
-
-# Gráfico final corregido
-enso_plot <- ggplot(enso_df, aes(x = Date, y = ONI)) +
-  # Áreas sombreadas de Niño y Niña seleccionados (sin leyenda)
-  geom_rect(data = selected_periods,
-            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf),
-            fill = "gray50", alpha = 0.2,
-            inherit.aes = FALSE, show.legend = FALSE) +
-  # Barras ONI codificadas por fase
-  geom_col(aes(fill = oni_cat), show.legend = TRUE) +
-  scale_fill_manual(
-    values = c("La Niña" = pal[1], "Neutral" = "gray70", "El Niño" = pal[10]),
-    name = NULL
-  ) +
-  # Eje temporal
-  scale_x_date(
-    date_breaks = "10 years",
-    date_labels = "%Y",
-    expand = expansion(mult = c(0.01, 0.01))
-  ) +
-  # Líneas horizontales clave
-  geom_hline(yintercept = c(-0.5, 0.5),
-             linetype = "dotted", color = "gray40") +
-  # Inicio SMAP 1 abril 2015
-  geom_vline(xintercept = as.Date("2015-03-31"), 
-             color = "black", 
-             linetype = "solid", 
-             linewidth = 0.6) +
-  annotate("text", 
-           x = as.Date("2015-03-31"), y = 1.6, 
-           label = "Inicio SMAP", 
-           angle = 90, vjust = -0.5, hjust = 0, size = 3.5) +
-  # Inicio CHIRPS 1 enero 1981
-  geom_vline(xintercept = as.Date("1981-01-01"), 
-             color = "gray40", 
-             linetype = "solid", 
-             linewidth = 0.6) +
-  annotate("text", 
-           x = as.Date("1981-01-01"), y = 1.3, 
-           label = "Inicio CHIRPS", 
-           angle = 90, vjust = -0.5, hjust = 0, size = 3.5) +
-  # Estética general
-  labs(
-    title = "Índice ONI y fases ENSO seleccionadas",
-    y = "ONI (Oceanic Niño Index)",
-    x = NULL
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    legend.position = "top",
-    panel.grid.major.y = element_line(color = "gray90", linetype = "dotted"),
-    panel.grid.minor.y = element_blank(),
-    panel.grid.major.x = element_blank(),
-    panel.grid.minor.x = element_blank()
-  )
-
-# Mostrar gráfico
-enso_plot
-
-# Guardar
-ggsave(
-  filename = here::here("Figures", "ENSO_ONI_fases_sombreado.png"),
-  plot = enso_plot,
-  width = 9, height = 5, dpi = 350
-)
-
-```
-
-### 1.2 Descarga SMAP
-
-Se llama la función para descarga de datos de humedad del suelo de SMAP para los intervalos seleccionados.
-
-```{r descarga_smap}
-
-# Descarga de SMAP NSIDC-0779 para Colombia en los periodos ENSO definidos
-# - El Niño: marzo 2015 a junio 2016
-# - La Niña: julio 2021 a febrero 2023
-# Los archivos .tif se almacenan en Google Drive (ID definido)
-# ------------------------------------------------------------------------------
-
-source("00_funcion_descarga_smap_dispatch.R")   # carga función de descarga SMAP
+source("00_funcion_descarga_smap_dispatch.R")   # carga función
 
 # 1. Credenciales Earthdata
 Sys.setenv(EARTHDATA_USER = "cmguiob@unal.edu.co", EARTHDATA_PASS = "Emacacus56900!")
 
-# 2. Bounding box para Colombia (EPSG:4326)
+# 2. Bounding box Colombia (lat/long WGS-84)
 bbox_col <- c(-79.11, -4.49, -65.65, 12.58)
 
-# 3. Folder en Google Drive donde se guardan los archivos descargados
-drive_folder_id <- "1a7XAOTseCCJhs7Ynw2KZPMMmrcGGHjlW" #es un id de cm.guiob@gmail.com
-
-# 4. Descarga: El Niño 2015–2016 (ajustado a inicio de SMAP) - 914 imágenes encontradas
+# 4. Ejecuta la función para 2022-2023
 download_smap_dispatch(
-  start_date      = "2015-04-01",
-  end_date        = "2016-06-30",
+  start_date      = "2022-01-01", #modificar según ONI
+  end_date        = "2023-12-31", #modificar según ONI
   bbox            = bbox_col,
-  drive_folder_id = drive_folder_id,
+  drive_folder_id = "1MO7foHhqvcI6zRI2EFJ2ic_KvVdlWQXM", #acá se guardan los .tif
   earthdata_user  = Sys.getenv("EARTHDATA_USER"),
   earthdata_pass  = Sys.getenv("EARTHDATA_PASS")
 )
 
-# 5. Descarga: La Niña 2021–2022
-download_smap_dispatch(
-  start_date      = "2021-07-01",
-  end_date        = "2023-02-28",
-  bbox            = bbox_col,
-  drive_folder_id = drive_folder_id,
-  earthdata_user  = Sys.getenv("EARTHDATA_USER"),
-  earthdata_pass  = Sys.getenv("EARTHDATA_PASS")
-)
 
-```
 
-Verificación
-
-```{r}
+## -----------------------------------------------------------------------------------------------------------
 
 dir_smap <- here::here("Data")
 files <- list.files(dir_smap, pattern = "SM_DS_[0-9]{8}\\.tif$", full.names = TRUE)
@@ -258,11 +95,9 @@ dev.off()
 cat("Plot saved to:", out_plot, "\n")
 
 
-```
 
-Verificación de promedios cada 4 días
 
-```{r}
+## -----------------------------------------------------------------------------------------------------------
 
 dir_smap <- here::here("Data")
 out_dir  <- here::here("Figures")
@@ -312,11 +147,9 @@ plot(stack_blocks,
 dev.off()
 cat("Mosaico PNG guardado en:", out_plot, "\n")
 
-```
-Verificación de serie de tiempo. 
 
 
-```{r}
+## -----------------------------------------------------------------------------------------------------------
 
 # Primero se seleccionan y verifican 4 puntos
 coords <- data.frame(
@@ -382,13 +215,9 @@ if(any(!is.na(df_long$SM))) {
 coords$Zona <- point_names
 print(coords)
 
-```
 
-### 1.2 Carga y verificación CHIRPS
 
-El siguiente es un código de ejemplo, que sirve de base para la extracción de CHIRPS. Necesita modificación. Se pasan las funciones a GEE via rgee y se hace la descarga por lotes.
-
-```{r}
+## -----------------------------------------------------------------------------------------------------------
 
 # Colección diaria recortada
 chirps_daily <- ee$ImageCollection("UCSB-CHG/CHIRPS/DAILY")$
@@ -423,11 +252,9 @@ Map$addLayer(
   "Precip CV temporal (mensual)"
 )
 
-```
 
-Estracción y compilación de csv. Esto 
 
-```{r}
+## -----------------------------------------------------------------------------------------------------------
 
 
 #Extrae estadísticas  por UCS y las envía a Drive en lotes adaptativos - debe cambiarse a localizaciones de pixeles
@@ -499,17 +326,13 @@ combinar_y_subir_csv <- function(PRECIP_cv_temporal,
 }
 
 
-```
 
-Se cargan los datos consolidados de CHIRPS
 
-```{r}
+## -----------------------------------------------------------------------------------------------------------
 
 # Precip cv temporal
 precip_cv_temp <- readr::read_csv(
   here::here("Data/OUT_PRECIP_cv_temporal_combinado.csv"),
   show_col_types = FALSE
 )
-```
-
 
