@@ -216,16 +216,16 @@ Se llama la función para descarga de datos de humedad del suelo de SMAP para lo
 # Los archivos .tif se almacenan en Google Drive (ID definido)
 # ------------------------------------------------------------------------------
 
-source("00_funcion_descarga_smap_dispatch.R")   # carga función de descarga SMAP
-
-# 1. Credenciales Earthdata
-Sys.setenv(EARTHDATA_USER = "cmguiob@unal.edu.co", EARTHDATA_PASS = "Emacacus56900!")
-
-# 2. Bounding box para Colombia (EPSG:4326)
-bbox_col <- c(-79.11, -4.49, -65.65, 12.58)
-
-# 3. Folder en Google Drive donde se guardan los archivos descargados
-drive_folder_id <- "1a7XAOTseCCJhs7Ynw2KZPMMmrcGGHjlW" #es un id de cm.guiob@gmail.com
+# source("00_funcion_descarga_smap_dispatch.R")   # carga función de descarga SMAP
+# 
+# # 1. Credenciales Earthdata
+# Sys.setenv(EARTHDATA_USER = "cmguiob@unal.edu.co", EARTHDATA_PASS = "Emacacus56900!")
+# 
+# # 2. Bounding box para Colombia (EPSG:4326)
+# bbox_col <- c(-79.11, -4.49, -65.65, 12.58)
+# 
+# # 3. Folder en Google Drive donde se guardan los archivos descargados
+# drive_folder_id <- "1a7XAOTseCCJhs7Ynw2KZPMMmrcGGHjlW" #es un id de cm.guiob@gmail.com
 
 # 4. Descarga: El Niño 2015–2016 (ajustado a inicio de SMAP) - 914 imágenes encontradas
 # download_smap_dispatch(
@@ -425,7 +425,6 @@ dev.off()
 writeRaster(cobertura_final, here("Data", "SMAP_cobertura_valida_ambos_periodos.tif"), overwrite = TRUE)
 
 
-plot(cobertura_final)
 ```
 Para garantizar que los puntos de muestreo se generen exclusivamente sobre las zonas con datos SMAP válidos (donde cobertura_final == TRUE), se convierte la máscara raster en un polígono vectorial. Este polígono se reproyecta a coordenadas métricas (EPSG:9377), se valida y luego se transforma en un objeto owin, compatible con {spatstat}. Esta ventana define con exactitud el área de muestreo para rSSI().
 
@@ -449,6 +448,7 @@ poligono_valido_proj <- sf::st_make_valid(sf::st_union(poligono_valido_proj))
 # 5. Convertir a owin (ahora sí funciona)
 owin_valida <- spatstat.geom::as.owin(poligono_valido_proj)
 
+plot(cobertura_final)
 
 ```
 
@@ -502,8 +502,101 @@ ggplot() +
 
 
 
+```{r}
+
+# 1. Cargar la máscara raster binaria de cobertura válida (TRUE/FALSE)
+cobertura_final <- terra::rast(here::here("Data", "SMAP_cobertura_valida_ambos_periodos.tif"))
+
+# 2. Filtrar solo los valores TRUE (los FALSE se vuelven NA)
+cobertura_filtrada <- cobertura_final
+cobertura_filtrada[!cobertura_filtrada == 1] <- NA
+
+# 3. Convertir las zonas TRUE a polígonos (terra → sf)
+poligono_valido <- cobertura_filtrada |>
+  terra::as.polygons(dissolve = TRUE, na.rm = TRUE) |>
+  sf::st_as_sf()
+
+# 4. Verificación visual del multipolígono generado
+plot(poligono_valido$geometry, col = "#cce5df", border = "gray40",
+     main = "Zonas de cobertura SMAP válida (poligonizadas)")
+```
 
 
+
+
+```{r}
+
+# 5. Reproyectar polígonos a sistema métrico (EPSG:9377)
+poligono_valido_proj <- sf::st_transform(poligono_valido, 9377)
+
+# 6. Unificar geometrías y validar topología
+poligono_valido_proj <- sf::st_make_valid(sf::st_union(poligono_valido_proj))
+
+# 7. Convertir a objeto owin para uso con spatstat
+owin_valida <- spatstat.geom::as.owin(poligono_valido_proj)
+
+# 8. Ejecutar muestreo inhibido rSSI sobre la ventana de zonas válidas
+set.seed(123)
+muestreo <- spatstat.random::rSSI(
+  r = 10000,
+  giveup = 10000,
+  win = owin_valida,
+  nsim = 1
+)
+
+#Convertir a sf (EPSG:9377 → EPSG:4326)
+muestreo_sf <- sf::st_as_sf(
+  data.frame(x = muestreo$x, y = muestreo$y),
+  coords = c("x", "y"),
+  crs = 9377
+) |>
+  sf::st_transform(4326)
+
+# 10. Visualización con ggplot2 sobre el polígono de cobertura
+library(ggplot2)
+
+ggplot() +
+  geom_sf(data = poligono_valido, fill = "gray90", color = NA) +
+  geom_sf(data = muestreo_sf, color = "darkblue", size = 0.3, alpha = 0.8) +
+  coord_sf(crs = 4326) +
+  theme_minimal(base_size = 13) +
+  labs(
+    title = "Puntos de muestreo espacial sobre zonas SMAP válidas",
+    subtitle = "Muestreo inhibido (r = 10 km) sobre cobertura_final",
+    caption = "Fuente: SMAP NSIDC-0779"
+  )
+
+cat("\u2714\ufe0f Puntos de muestreo generados:", muestreo$n, "\n")
+
+
+# 12. Exportar como archivo .qs a Google Drive
+qs::qsave(
+  muestreo_sf,
+  file = "puntos_muestreo_rSSI.qs"
+)
+
+googledrive::drive_upload(
+  media = "puntos_muestreo_rSSI.qs",
+  path = as_id("1PhfwOQOuHXmEIKE20i2-nqZaRrRfW0V9"),
+  name = "puntos_muestreo_rSSI.qs",
+  overwrite = TRUE
+)
+
+cat("\u2714\ufe0f Exportado como .qs a Google Drive\n")
+
+
+# 11. Exportar como GeoPackage
+sf::st_write(
+  muestreo_sf,
+  dsn = here::here("Data", "puntos_muestreo_rSSI.gpkg"),
+  delete_dsn = TRUE,
+  quiet = TRUE
+)
+
+cat("\u2714\ufe0f Exportado como 'Data/puntos_muestreo_rSSI.gpkg' (EPSG:4326)\n")
+
+
+```
 
 
 
